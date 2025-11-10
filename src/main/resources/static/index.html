@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chat Distribuido — Proyecto</title>
+
+  <!-- SockJS + STOMP -->
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+
+  <style>
+    :root{
+      --accent:#2563eb;
+      --muted:#6b7280;
+      --bg:#f7fafc;
+      --card:#ffffff;
+      --me:#dcf8c6;
+      --other:#ffffff;
+      --shadow: 0 6px 18px rgba(16,24,40,0.06);
+      --radius:12px;
+      font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+
+    body{margin:0;background:linear-gradient(180deg,#eef2ff 0%,var(--bg) 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .app{width:960px;max-width:100%;background:transparent;display:grid;grid-template-columns:360px 1fr;gap:18px}
+    .panel{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px}
+    .left{display:flex;flex-direction:column;gap:12px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,var(--accent),#8b5cf6);display:flex;align-items:center;justify-content:center;color:white;font-weight:700}
+    h1{margin:0;font-size:18px}
+    .subtitle{color:var(--muted);font-size:13px;margin-top:2px}
+
+    .users{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+    .user-item{display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;background:#fbfdff;border:1px solid #f1f5f9}
+    .dot{width:10px;height:10px;border-radius:50%;background:#34d399}
+
+    .right{display:flex;flex-direction:column}
+    #chatWindow{flex:1;background:linear-gradient(180deg,#ffffff,#fbfbff);border-radius:10px;padding:16px;overflow:auto;border:1px solid #f1f5f9;height:520px}
+    .input-row{display:flex;gap:10px;margin-top:12px}
+    input[type="text"]{flex:1;padding:10px;border-radius:10px;border:1px solid #e6e9ef;font-size:14px}
+    button{padding:10px 16px;border-radius:10px;border:none;background:var(--accent);color:white;font-weight:600;cursor:pointer}
+    button.secondary{background:#f3f4f6;color:#111;border:1px solid #e6e9ef}
+    .message{max-width:70%;padding:10px;border-radius:12px;margin:8px 0;box-shadow:0 4px 8px rgba(15,23,42,0.03);display:inline-block}
+    .meta{font-size:12px;color:var(--muted);margin-bottom:6px}
+    .me{background:var(--me);align-self:flex-end}
+    .other{background:var(--other)}
+    .msg-row{display:flex;flex-direction:column}
+    .header-controls{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:8px}
+    .small{font-size:13px;color:var(--muted)}
+    .footer-note{font-size:12px;color:var(--muted);margin-top:8px}
+    .system-msg{color:#6b7280;font-style:italic;padding:6px 0;text-align:center;font-size:13px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="panel left">
+      <div class="brand">
+        <div class="logo">CH</div>
+        <div>
+          <h1>Chat Distribuido</h1>
+          <div class="subtitle">Comunicación en tiempo real — WebSocket (STOMP)</div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label class="small">Tu nombre</label>
+        <input id="username" type="text" placeholder="Ej: Mateo Altamirano" />
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="btnConnect">Conectar</button>
+        <button id="btnDisconnect" class="secondary" disabled>Desconectar</button>
+      </div>
+
+      <div class="footer-note">Comparte la dirección <strong id="shareUrl">--</strong> para que otros se conecten.</div>
+
+      <div style="margin-top:14px">
+        <h3 style="font-size:14px;margin:0 0 8px 0">Usuarios conectados (<span id="userCount">0</span>)</h3>
+        <div class="users" id="usersList">
+          <!-- usuarios dinámicos -->
+        </div>
+      </div>
+    </div>
+
+    <div class="panel right">
+      <div class="header-controls">
+        <div>
+          <strong id="roomTitle">Sala: General</strong>
+          <div class="small">Mensajes en tiempo real</div>
+        </div>
+        <div>
+          <button id="btnClear" class="secondary">Limpiar chat</button>
+        </div>
+      </div>
+
+      <div id="chatWindow" aria-live="polite"></div>
+
+      <div class="input-row" style="margin-top:12px">
+        <input id="message" type="text" placeholder="Escribe tu mensaje..." />
+        <button id="btnSend" disabled>Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Config
+    const wsEndpoint = '/chat';
+    let stompClient = null;
+    let username = '';
+    let connected = false;
+    const usersSet = new Set();
+
+    const chatWindow = document.getElementById('chatWindow');
+    const usersList = document.getElementById('usersList');
+    const userCount = document.getElementById('userCount');
+    const btnConnect = document.getElementById('btnConnect');
+    const btnDisconnect = document.getElementById('btnDisconnect');
+    const btnSend = document.getElementById('btnSend');
+    const btnClear = document.getElementById('btnClear');
+    const inputUser = document.getElementById('username');
+    const inputMsg = document.getElementById('message');
+    const shareUrl = document.getElementById('shareUrl');
+
+    // Muestra la URL para compartir
+    (function setShareUrl(){
+      const ipHint = location.hostname === 'localhost' ? getLocalIpHint() : location.hostname;
+      shareUrl.textContent = `http://${ipHint}:8080/`;
+    })();
+
+    // Helpers
+    function addUser(name){
+      if(!name) return;
+      usersSet.add(name);
+      renderUsers();
+    }
+    function removeUser(name){
+      usersSet.delete(name);
+      renderUsers();
+    }
+    function renderUsers(){
+      usersList.innerHTML = '';
+      userCount.textContent = usersSet.size;
+      usersSet.forEach(u => {
+        const el = document.createElement('div');
+        el.className = 'user-item';
+        el.innerHTML = `<div style="width:8px;height:8px;background:#34d399;border-radius:50%;margin-right:8px"></div><div>${escapeHtml(u)}</div>`;
+        usersList.appendChild(el);
+      });
+    }
+    function escapeHtml(s){ 
+      if(!s) return ''; 
+      return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); 
+    }
+    function appendMessage(from, content, time, mine){
+      const row = document.createElement('div');
+      row.className = 'msg-row';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `[${time}] ${from}`;
+      const bubble = document.createElement('div');
+      bubble.className = 'message ' + (mine ? 'me' : 'other');
+      bubble.textContent = content;
+      row.appendChild(meta);
+      row.appendChild(bubble);
+      chatWindow.appendChild(row);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+    function appendSystemMessage(content, time){
+      const row = document.createElement('div');
+      row.className = 'system-msg';
+      row.textContent = `[${time}] ${content}`;
+      chatWindow.appendChild(row);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    // Conexión
+    btnConnect.addEventListener('click', () => {
+      username = inputUser.value.trim();
+      if(!username){ alert('Ingresa tu nombre'); inputUser.focus(); return; }
+
+      const socket = new SockJS('http://192.168.1.183:8080/chat');
+      stompClient = Stomp.over(socket);
+
+      stompClient.connect({}, function(frame){
+        connected = true;
+        btnConnect.disabled = true;
+        btnDisconnect.disabled = false;
+        btnSend.disabled = false;
+        appendSystemMessage('Conectado como ' + username, new Date().toLocaleTimeString());
+
+        // Suscribirse a mensajes normales
+        stompClient.subscribe('/topic/messages', function(msg){
+          const payload = JSON.parse(msg.body);
+          const mine = payload.from === username;
+          
+          // Si el mensaje es de tipo 'JOIN' o 'LEAVE', tratarlo como sistema
+          if(payload.type === 'JOIN'){
+            appendSystemMessage(`${payload.from} se ha unido al chat`, payload.time || new Date().toLocaleTimeString());
+            addUser(payload.from);
+          } else if(payload.type === 'LEAVE'){
+            appendSystemMessage(`${payload.from} se ha desconectado`, payload.time || new Date().toLocaleTimeString());
+            removeUser(payload.from);
+          } else {
+            // Mensaje normal
+            appendMessage(payload.from, payload.content, payload.time || new Date().toLocaleTimeString(), mine);
+            addUser(payload.from);
+          }
+        });
+
+        // Suscribirse a la lista de usuarios (opcional, si tu backend lo soporta)
+        stompClient.subscribe('/topic/users', function(msg){
+          const userList = JSON.parse(msg.body);
+          usersSet.clear();
+          userList.forEach(u => usersSet.add(u));
+          renderUsers();
+        });
+
+        // Enviar JOIN
+        stompClient.send('/app/join', {}, JSON.stringify({ 
+          from: username, 
+          type: 'JOIN',
+          time: new Date().toLocaleTimeString()
+        }));
+      }, function(error){
+        appendSystemMessage('Error de conexión', new Date().toLocaleTimeString());
+        console.error('STOMP error', error);
+      });
+    });
+
+    btnDisconnect.addEventListener('click', () => {
+      if(stompClient && connected){
+        // Enviar mensaje de desconexión ANTES de desconectar
+        stompClient.send('/app/leave', {}, JSON.stringify({ 
+          from: username, 
+          type: 'LEAVE',
+          time: new Date().toLocaleTimeString()
+        }));
+        
+        // Esperar un momento para que el mensaje se envíe
+        setTimeout(() => {
+          stompClient.disconnect(() => {
+            appendSystemMessage('Desconectado', new Date().toLocaleTimeString());
+            btnConnect.disabled = false;
+            btnDisconnect.disabled = true;
+            btnSend.disabled = true;
+            connected = false;
+            usersSet.clear();
+            renderUsers();
+          });
+        }, 100);
+      }
+    });
+
+    btnSend.addEventListener('click', () => sendCurrent());
+    inputMsg.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendCurrent(); });
+
+    function sendCurrent(){
+      const text = inputMsg.value.trim();
+      if(!text) return;
+      if(!stompClient || !connected){ alert('No estás conectado'); return; }
+      const payload = { 
+        from: username, 
+        content: text,
+        time: new Date().toLocaleTimeString()
+      };
+      stompClient.send('/app/send', {}, JSON.stringify(payload));
+      inputMsg.value = '';
+    }
+
+    btnClear.addEventListener('click', () => { chatWindow.innerHTML = ''; });
+
+    function getLocalIpHint(){
+      return location.hostname === 'localhost' ? 'TU_IP_LOCAL' : location.hostname;
+    }
+
+    // Manejar desconexión inesperada (cerrar pestaña, etc.)
+    window.addEventListener('beforeunload', () => {
+      if(stompClient && connected){
+        stompClient.send('/app/leave', {}, JSON.stringify({ 
+          from: username, 
+          type: 'LEAVE'
+        }));
+      }
+    });
+  </script>
+</body>
+</html>

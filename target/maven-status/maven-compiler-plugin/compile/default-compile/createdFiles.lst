@@ -1,0 +1,5 @@
+com\example\chatbackend\ChatBackendApplication.class
+com\example\chatbackend\controller\ChatController.class
+com\example\chatbackend\model\Message.class
+com\example\chatbackend\config\WebSocketEventListener.class
+com\example\chatbackend\config\WebSocketConfig.class
