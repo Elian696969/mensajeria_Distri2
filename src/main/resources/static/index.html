@@ -53,236 +53,260 @@
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="panel left">
-      <div class="brand">
-        <div class="logo">CH</div>
-        <div>
-          <h1>Chat Distribuido</h1>
-          <div class="subtitle">Comunicación en tiempo real — WebSocket (STOMP)</div>
-        </div>
-      </div>
-
-      <div style="margin-top:12px">
-        <label class="small">Tu nombre</label>
-        <input id="username" type="text" placeholder="Ej: Mateo Altamirano" />
-      </div>
-
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button id="btnConnect">Conectar</button>
-        <button id="btnDisconnect" class="secondary" disabled>Desconectar</button>
-      </div>
-
-      <div class="footer-note">Comparte la dirección <strong id="shareUrl">--</strong> para que otros se conecten.</div>
-
-      <div style="margin-top:14px">
-        <h3 style="font-size:14px;margin:0 0 8px 0">Usuarios conectados (<span id="userCount">0</span>)</h3>
-        <div class="users" id="usersList">
-          <!-- usuarios dinámicos -->
-        </div>
+<div class="app">
+  <div class="panel left">
+    <div class="brand">
+      <div class="logo">CH</div>
+      <div>
+        <h1>Chat Distribuido</h1>
+        <div class="subtitle">Comunicación en tiempo real — WebSocket (STOMP)</div>
       </div>
     </div>
 
-    <div class="panel right">
-      <div class="header-controls">
-        <div>
-          <strong id="roomTitle">Sala: General</strong>
-          <div class="small">Mensajes en tiempo real</div>
-        </div>
-        <div>
-          <button id="btnClear" class="secondary">Limpiar chat</button>
-        </div>
-      </div>
+    <div style="margin-top:12px">
+      <label class="small">Tu nombre</label>
+      <input id="username" type="text" placeholder="Ej: Mateo Altamirano" />
+    </div>
 
-      <div id="chatWindow" aria-live="polite"></div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button id="btnConnect">Conectar</button>
+      <button id="btnDisconnect" class="secondary" disabled>Desconectar</button>
+    </div>
 
-      <div class="input-row" style="margin-top:12px">
-        <input id="message" type="text" placeholder="Escribe tu mensaje..." />
-        <button id="btnSend" disabled>Enviar</button>
+    <div class="footer-note">Comparte la dirección <strong id="shareUrl">--</strong> para que otros se conecten.</div>
+
+    <div style="margin-top:14px">
+      <h3 style="font-size:14px;margin:0 0 8px 0">Usuarios conectados (<span id="userCount">0</span>)</h3>
+      <div class="users" id="usersList">
+        <!-- usuarios dinámicos -->
       </div>
     </div>
   </div>
 
-  <script>
-    // Config
-    const wsEndpoint = '/chat';
-    let stompClient = null;
-    let username = '';
-    let connected = false;
-    const usersSet = new Set();
+  <div class="panel right">
+    <div class="header-controls">
+      <div>
+        <strong id="roomTitle">Sala: General</strong>
+        <div class="small">Mensajes en tiempo real</div>
+      </div>
+      <div>
+        <button id="btnClear" class="secondary">Limpiar chat</button>
+      </div>
+    </div>
 
-    const chatWindow = document.getElementById('chatWindow');
-    const usersList = document.getElementById('usersList');
-    const userCount = document.getElementById('userCount');
-    const btnConnect = document.getElementById('btnConnect');
-    const btnDisconnect = document.getElementById('btnDisconnect');
-    const btnSend = document.getElementById('btnSend');
-    const btnClear = document.getElementById('btnClear');
-    const inputUser = document.getElementById('username');
-    const inputMsg = document.getElementById('message');
-    const shareUrl = document.getElementById('shareUrl');
+    <div id="chatWindow" aria-live="polite"></div>
 
-    // Muestra la URL para compartir
-    (function setShareUrl(){
-      const ipHint = location.hostname === 'localhost' ? getLocalIpHint() : location.hostname;
-      shareUrl.textContent = `http://${ipHint}:8080/`;
-    })();
+    <div class="input-row" style="margin-top:12px">
+      <input id="message" type="text" placeholder="Escribe tu mensaje..." />
+      <button id="btnSend" disabled>Enviar</button>
+    </div>
+  </div>
+</div>
 
-    // Helpers
-    function addUser(name){
-      if(!name) return;
-      usersSet.add(name);
-      renderUsers();
-    }
-    function removeUser(name){
-      usersSet.delete(name);
-      renderUsers();
-    }
-    function renderUsers(){
-      usersList.innerHTML = '';
-      userCount.textContent = usersSet.size;
-      usersSet.forEach(u => {
-        const el = document.createElement('div');
-        el.className = 'user-item';
-        el.innerHTML = `<div style="width:8px;height:8px;background:#34d399;border-radius:50%;margin-right:8px"></div><div>${escapeHtml(u)}</div>`;
-        usersList.appendChild(el);
+<script>
+  // Config
+  const wsEndpoint = '/chat';
+  let stompClient = null;
+  let username = '';
+  let connected = false;
+  const usersSet = new Set();
+
+  const chatWindow = document.getElementById('chatWindow');
+  const usersList = document.getElementById('usersList');
+  const userCount = document.getElementById('userCount');
+  const btnConnect = document.getElementById('btnConnect');
+  const btnDisconnect = document.getElementById('btnDisconnect');
+  const btnSend = document.getElementById('btnSend');
+  const btnClear = document.getElementById('btnClear');
+  const inputUser = document.getElementById('username');
+  const inputMsg = document.getElementById('message');
+  const shareUrl = document.getElementById('shareUrl');
+
+  // Sonidos
+  const soundJoin = new Audio('../sounds/join.wav');
+  const soundLeave = new Audio('../sounds/leave.mp3');
+  const soundMessage = new Audio('../sounds/message.wav');
+
+  // Opcional: baja un poco el volumen si es fuerte
+  soundJoin.volume = 0.5;
+  soundLeave.volume = 0.5;
+  soundMessage.volume = 0.6;
+
+  // Muestra la URL para compartir
+  (function setShareUrl(){
+    const ipHint = location.hostname === 'localhost' ? getLocalIpHint() : location.hostname;
+    shareUrl.textContent = `http://${ipHint}:8080/`;
+  })();
+
+  // Helpers
+  function addUser(name){
+    if(!name) return;
+    usersSet.add(name);
+    renderUsers();
+  }
+  function removeUser(name){
+    usersSet.delete(name);
+    renderUsers();
+  }
+  function renderUsers(){
+    usersList.innerHTML = '';
+    userCount.textContent = usersSet.size;
+    usersSet.forEach(u => {
+      const el = document.createElement('div');
+      el.className = 'user-item';
+      el.innerHTML = `<div style="width:8px;height:8px;background:#34d399;border-radius:50%;margin-right:8px"></div><div>${escapeHtml(u)}</div>`;
+      usersList.appendChild(el);
+    });
+  }
+  function escapeHtml(s){
+    if(!s) return '';
+    return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+  }
+  function appendMessage(from, content, time, mine){
+    const row = document.createElement('div');
+    row.className = 'msg-row';
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = `[${time}] ${from}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'message ' + (mine ? 'me' : 'other');
+    bubble.textContent = content;
+    row.appendChild(meta);
+    row.appendChild(bubble);
+    chatWindow.appendChild(row);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+  function appendSystemMessage(content, time){
+    const row = document.createElement('div');
+    row.className = 'system-msg';
+    row.textContent = `[${time}] ${content}`;
+    chatWindow.appendChild(row);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+
+  // Conexión
+  btnConnect.addEventListener('click', () => {//////////////////////Quitar bloqueos de sonido
+
+    // Desbloquear sonidos al primer clic
+    [soundJoin, soundLeave, soundMessage].forEach(s => s.play().then(()=>s.pause()).catch(()=>{}));
+
+    username = inputUser.value.trim();
+    if(!username){ alert('Ingresa tu nombre'); inputUser.focus(); return; }
+
+    const socket = new SockJS('http://192.168.1.183:8080/chat');
+    stompClient = Stomp.over(socket);
+
+    stompClient.connect({}, function(frame){
+      connected = true;
+      btnConnect.disabled = true;
+      btnDisconnect.disabled = false;
+      btnSend.disabled = false;
+      appendSystemMessage('Conectado como ' + username, new Date().toLocaleTimeString());
+
+      // Suscribirse a mensajes normales
+      stompClient.subscribe('/topic/messages', function(msg){
+        const payload = JSON.parse(msg.body);
+        const mine = payload.from === username;
+
+        if(payload.type === 'JOIN'){
+          appendSystemMessage(`${payload.from} se ha unido al chat`, payload.time || new Date().toLocaleTimeString());
+          addUser(payload.from);
+
+          // 🔊 Sonido de usuario que entra
+          if (payload.from !== username) soundJoin.play().catch(()=>{});
+        }
+        else if(payload.type === 'LEAVE'){
+          appendSystemMessage(`${payload.from} se ha desconectado`, payload.time || new Date().toLocaleTimeString());
+          removeUser(payload.from);
+
+          // 🔊 Sonido de usuario que se va
+          soundLeave.play().catch(()=>{});
+        }
+        else {
+          appendMessage(payload.from, payload.content, payload.time || new Date().toLocaleTimeString(), mine);
+          addUser(payload.from);
+
+          // 🔊 Sonido de mensaje nuevo (solo si no es mío)
+          if (!mine) soundMessage.play().catch(()=>{});
+        }
       });
-    }
-    function escapeHtml(s){ 
-      if(!s) return ''; 
-      return s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); 
-    }
-    function appendMessage(from, content, time, mine){
-      const row = document.createElement('div');
-      row.className = 'msg-row';
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `[${time}] ${from}`;
-      const bubble = document.createElement('div');
-      bubble.className = 'message ' + (mine ? 'me' : 'other');
-      bubble.textContent = content;
-      row.appendChild(meta);
-      row.appendChild(bubble);
-      chatWindow.appendChild(row);
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-    }
-    function appendSystemMessage(content, time){
-      const row = document.createElement('div');
-      row.className = 'system-msg';
-      row.textContent = `[${time}] ${content}`;
-      chatWindow.appendChild(row);
-      chatWindow.scrollTop = chatWindow.scrollHeight;
-    }
 
-    // Conexión
-    btnConnect.addEventListener('click', () => {
-      username = inputUser.value.trim();
-      if(!username){ alert('Ingresa tu nombre'); inputUser.focus(); return; }
 
-      const socket = new SockJS('http://192.168.1.183:8080/chat');
-      stompClient = Stomp.over(socket);
+      // Suscribirse a la lista de usuarios (opcional, si tu backend lo soporta)
+      stompClient.subscribe('/topic/users', function(msg){
+        const userList = JSON.parse(msg.body);
+        usersSet.clear();
+        userList.forEach(u => usersSet.add(u));
+        renderUsers();
+      });
 
-      stompClient.connect({}, function(frame){
-        connected = true;
-        btnConnect.disabled = true;
-        btnDisconnect.disabled = false;
-        btnSend.disabled = false;
-        appendSystemMessage('Conectado como ' + username, new Date().toLocaleTimeString());
+      // Enviar JOIN
+      stompClient.send('/app/join', {}, JSON.stringify({
+        from: username,
+        type: 'JOIN',
+        time: new Date().toLocaleTimeString()
+      }));
+    }, function(error){
+      appendSystemMessage('Error de conexión', new Date().toLocaleTimeString());
+      console.error('STOMP error', error);
+    });
+  });
 
-        // Suscribirse a mensajes normales
-        stompClient.subscribe('/topic/messages', function(msg){
-          const payload = JSON.parse(msg.body);
-          const mine = payload.from === username;
-          
-          // Si el mensaje es de tipo 'JOIN' o 'LEAVE', tratarlo como sistema
-          if(payload.type === 'JOIN'){
-            appendSystemMessage(`${payload.from} se ha unido al chat`, payload.time || new Date().toLocaleTimeString());
-            addUser(payload.from);
-          } else if(payload.type === 'LEAVE'){
-            appendSystemMessage(`${payload.from} se ha desconectado`, payload.time || new Date().toLocaleTimeString());
-            removeUser(payload.from);
-          } else {
-            // Mensaje normal
-            appendMessage(payload.from, payload.content, payload.time || new Date().toLocaleTimeString(), mine);
-            addUser(payload.from);
-          }
-        });
+  btnDisconnect.addEventListener('click', () => {
+    if(stompClient && connected){
+      // Enviar mensaje de desconexión ANTES de desconectar
+      stompClient.send('/app/leave', {}, JSON.stringify({
+        from: username,
+        type: 'LEAVE',
+        time: new Date().toLocaleTimeString()
+      }));
 
-        // Suscribirse a la lista de usuarios (opcional, si tu backend lo soporta)
-        stompClient.subscribe('/topic/users', function(msg){
-          const userList = JSON.parse(msg.body);
+      // Esperar un momento para que el mensaje se envíe
+      setTimeout(() => {
+        stompClient.disconnect(() => {
+          appendSystemMessage('Desconectado', new Date().toLocaleTimeString());
+          btnConnect.disabled = false;
+          btnDisconnect.disabled = true;
+          btnSend.disabled = true;
+          connected = false;
           usersSet.clear();
-          userList.forEach(u => usersSet.add(u));
           renderUsers();
         });
-
-        // Enviar JOIN
-        stompClient.send('/app/join', {}, JSON.stringify({ 
-          from: username, 
-          type: 'JOIN',
-          time: new Date().toLocaleTimeString()
-        }));
-      }, function(error){
-        appendSystemMessage('Error de conexión', new Date().toLocaleTimeString());
-        console.error('STOMP error', error);
-      });
-    });
-
-    btnDisconnect.addEventListener('click', () => {
-      if(stompClient && connected){
-        // Enviar mensaje de desconexión ANTES de desconectar
-        stompClient.send('/app/leave', {}, JSON.stringify({ 
-          from: username, 
-          type: 'LEAVE',
-          time: new Date().toLocaleTimeString()
-        }));
-        
-        // Esperar un momento para que el mensaje se envíe
-        setTimeout(() => {
-          stompClient.disconnect(() => {
-            appendSystemMessage('Desconectado', new Date().toLocaleTimeString());
-            btnConnect.disabled = false;
-            btnDisconnect.disabled = true;
-            btnSend.disabled = true;
-            connected = false;
-            usersSet.clear();
-            renderUsers();
-          });
-        }, 100);
-      }
-    });
-
-    btnSend.addEventListener('click', () => sendCurrent());
-    inputMsg.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendCurrent(); });
-
-    function sendCurrent(){
-      const text = inputMsg.value.trim();
-      if(!text) return;
-      if(!stompClient || !connected){ alert('No estás conectado'); return; }
-      const payload = { 
-        from: username, 
-        content: text,
-        time: new Date().toLocaleTimeString()
-      };
-      stompClient.send('/app/send', {}, JSON.stringify(payload));
-      inputMsg.value = '';
+      }, 100);
     }
+  });
 
-    btnClear.addEventListener('click', () => { chatWindow.innerHTML = ''; });
+  btnSend.addEventListener('click', () => sendCurrent());
+  inputMsg.addEventListener('keydown', (e) => { if(e.key === 'Enter') sendCurrent(); });
 
-    function getLocalIpHint(){
-      return location.hostname === 'localhost' ? 'TU_IP_LOCAL' : location.hostname;
+  function sendCurrent(){
+    const text = inputMsg.value.trim();
+    if(!text) return;
+    if(!stompClient || !connected){ alert('No estás conectado'); return; }
+    const payload = {
+      from: username,
+      content: text,
+      time: new Date().toLocaleTimeString()
+    };
+    stompClient.send('/app/send', {}, JSON.stringify(payload));
+    inputMsg.value = '';
+  }
+
+  btnClear.addEventListener('click', () => { chatWindow.innerHTML = ''; });
+
+  function getLocalIpHint(){
+    return location.hostname === 'localhost' ? 'TU_IP_LOCAL' : location.hostname;
+  }
+
+  // Manejar desconexión inesperada (cerrar pestaña, etc.)
+  window.addEventListener('beforeunload', () => {
+    if(stompClient && connected){
+      stompClient.send('/app/leave', {}, JSON.stringify({
+        from: username,
+        type: 'LEAVE'
+      }));
     }
-
-    // Manejar desconexión inesperada (cerrar pestaña, etc.)
-    window.addEventListener('beforeunload', () => {
-      if(stompClient && connected){
-        stompClient.send('/app/leave', {}, JSON.stringify({ 
-          from: username, 
-          type: 'LEAVE'
-        }));
-      }
-    });
-  </script>
+  });
+</script>
 </body>
 </html>
